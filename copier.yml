@@ -1,4 +1,4 @@
-_subdirectory: .
+_subdirectory: template
 _templates_suffix: .jinja
 
 product_name:

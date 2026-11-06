@@ -1,9 +1,11 @@
 """{{ product_title }}: the AgentOS. `python main.py` serves it; `app` is for any ASGI server."""
 from pathlib import Path
 
+import os
 from demoskit import load_dotenv, make_os, serve
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
+os.environ.setdefault("AGENTOS_PORT", "{{ port }}")  # this product's port, unless .env says otherwise
 
 agent_os = make_os(id="{{ product_name }}", description="{{ product_title }}", agents=[], workflows=[])
 app = agent_os.get_app()
