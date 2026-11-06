@@ -1,0 +1,62 @@
+# Deploy one commit of main to {{ product_title }} production with deploy/release/deploy.sh:
+# backup (if configured), build, health check, automatic rollback. Started by hand only
+# (Actions → deploy → Run workflow). "check" changes nothing; it shows what would be deployed.
+# A commit is deployed only if the `check` CI job passed on it. Runs on the self-hosted runner
+# labelled "deploy" (the DemosOs host): the production security group admits ssh from there only.
+{% raw %}name: deploy
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check = preconditions only, deploy = deploy"
+        type: choice
+        options: [check, deploy]
+        default: check
+      sha:
+        description: "commit on main (empty = the head of main)"
+        required: false
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+permissions:
+  contents: read
+  checks: read
+jobs:
+  deploy:
+    runs-on: [self-hosted, deploy]
+    environment: production
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: resolve the commit, require green CI on it
+        id: sha
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_SHA: ${{ inputs.sha }}
+        run: |
+          sha=$(git rev-parse "${INPUT_SHA:-origin/main}^{commit}")
+          git merge-base --is-ancestor "$sha" origin/main || { echo "$sha is not on main"; exit 1; }
+          state=$(gh api "repos/${{ github.repository }}/commits/$sha/check-runs?check_name=check" -q '.check_runs[0].conclusion // "none"')
+          echo "commit $sha, CI: $state"
+          [ "$state" = success ] || { echo "CI did not pass on $sha"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+      - name: ssh key
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        # In the job's temp dir, never ~/.ssh: on the self-hosted runner that is the host's own.
+        run: |
+          umask 077
+          printf '%s\n' "$KEY" > "$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$KNOWN" > "$RUNNER_TEMP/known_hosts"
+      - name: deploy.sh ${{ inputs.mode }}
+        env:
+          DEPLOY_KEY: ${{ runner.temp }}/deploy_key
+          DEPLOY_SSH_OPTS: -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${{ runner.temp }}/known_hosts
+        run: bash deploy/release/deploy.sh deploy/release/production.env ${{ steps.sha.outputs.sha }} ${{ inputs.mode == 'check' && '--check' || '' }}
+      - name: remove the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy_key" "$RUNNER_TEMP/known_hosts"
+{% endraw %}

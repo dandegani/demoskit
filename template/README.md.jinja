@@ -1,0 +1,29 @@
+# {{ product_title }}
+
+מוצר Demos על Agno AgentOS, שנוצר מהתבנית של demoskit.
+
+## יצירת מוצר חדש מהתבנית
+
+```bash
+pip install copier
+copier copy ~/demoskit/template ~/my-product   # מ-checkout מקומי של demoskit
+cd ~/my-product && git init && cp example.env .env
+pip install -r requirements.txt
+make check    # הבדיקות (test חסר/מדולג = כישלון)
+make run      # http://localhost:{{ port }}/health
+```
+
+הסוכנים נכתבים ב-`agents.py` עם `claude_agent` ונכנסים ל-`make_os(agents=[...])` ב-`main.py`.
+
+## פריסה
+
+רק דרך הכפתור ב-GitHub: ‏Actions → deploy → Run workflow. ‏`check` מראה מה ייפרס ולא משנה
+כלום; `deploy` פורס commit מ-main שה-CI עבר עליו, עם health check ו-rollback אוטומטי
+(`deploy/release/deploy.sh`). לפני הפריסה הראשונה: `deploy/release/production.env.example`
+→ `production.env`, ושורה ב-edge של השרת (`compose.prod.yaml` מסביר).
+
+## איפה הסודות
+
+- בשרת ובפיתוח: `.env` (לא נכנס ל-git; התבנית ב-`example.env`).
+- מפתח ה-ssh לפריסה: סוד `DEPLOY_SSH_KEY` ו-`DEPLOY_KNOWN_HOSTS` ב-environment ‏`production` ב-GitHub.
+- חיוב Claude לסוכנים: `CLAUDE_CODE_OAUTH_TOKEN` (מ-`claude setup-token`) או `ANTHROPIC_API_KEY`, ב-`.env`.

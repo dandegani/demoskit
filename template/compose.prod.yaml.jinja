@@ -1,0 +1,19 @@
+# Production overlay: behind the edge nginx (DemosOs deploy/edge), which owns 80/443 on the
+# host, terminates TLS and proxies over the external docker network `edge`.
+#
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d
+#
+# On the edge: one line in nginx.conf's map,
+#   {{ domain }}  http://{{ product_name }}-agentos:{{ port }};
+# a certificate (issue-cert.sh) and a server block; then `docker exec edge-nginx nginx -s reload`.
+services:
+  agentos:
+    ports: !reset []
+    networks:
+      default:
+      edge:
+        aliases: [{{ product_name }}-agentos]
+
+networks:
+  edge:
+    external: true

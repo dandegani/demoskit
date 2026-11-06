@@ -1,0 +1,22 @@
+_subdirectory: .
+_templates_suffix: .jinja
+
+product_name:
+  type: str
+  help: Slug (lowercase, digits, hyphens); repo, compose project and container names
+  validator: "{% if not (product_name | regex_search('^[a-z][a-z0-9-]*$')) %}lowercase letters, digits and hyphens only{% endif %}"
+product_title:
+  type: str
+  help: Display name
+port:
+  type: int
+  default: 8000
+domain:
+  type: str
+  help: Public host name, e.g. product.demoscopia.ai
+needs_postgres:
+  type: bool
+  default: false
+python_version:
+  type: str
+  default: "3.12"

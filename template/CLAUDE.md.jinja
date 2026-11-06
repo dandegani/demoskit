@@ -1,0 +1,10 @@
+# {{ product_title }}
+
+Agno AgentOS product built on demoskit (`claude_agent`, `make_os`). Entry point `main.py`, agents in `agents.py`.
+
+- Run `make check` before every PR; it must end with `SUMMARY overall: PASS`. A skipped test is a failure.
+- `tests/test_boot.py` is the contract: the app boots and `/health` is 200. Keep it passing.
+- Deploy only via the GitHub button (Actions → deploy). Never run deploy.sh or docker on production by hand.
+- Never commit `.env` or any secret; new settings go into `example.env` with an empty value.
+- Agents get the narrowest tools: prefer `read_only_dir=` and explicit `allowed_tools`; no Bash/web unless needed.
+- Shared code goes into demoskit only on its second user (the rule of two); until then it lives here.
