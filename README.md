@@ -36,3 +36,8 @@ copier copy /path/to/demoskit/template ~/new-product
 
 קוד נכנס ל-demoskit רק כשיש לו משתמש שני. עד אז הוא נשאר במוצר שכתב אותו;
 כשמוצר נוסף צריך אותו, מעבירים אותו לכאן ושני המוצרים עוברים להשתמש בגרסה המשותפת.
+
+## שני דברים לשים לב אליהם ב-`claude_agent`
+
+- `retries=0` כברירת מחדל. סוכן שיש לו תופעות לוואי (push, שליחת הודעה) לא רץ שוב בשקט. סוכן קריאה בלבד יכול לקבל `retries=2`.
+- `env=None` פירושו `agent_env()`: משתני ה-Claude של התהליך עצמו (ANTHROPIC_API_KEY, CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN). מי שרוצה סביבה ריקה מעביר `env={}`.

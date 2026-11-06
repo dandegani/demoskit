@@ -32,7 +32,7 @@ def claude_agent(
     mcp_servers: Any = None,
     db: Any = None,
     env: Optional[Dict[str, str]] = None,
-    retries: int = 2,
+    retries: int = 0,
     delay_between_retries: int = 30,
     exponential_backoff: bool = True,
     max_buffer_size: Optional[int] = None,
@@ -50,7 +50,8 @@ def claude_agent(
         "//" is Claude Code's prefix for an absolute filesystem path in a permission rule.
     setting_sources: () means [] = never load the host's user/project/local Claude settings.
     env: env for the subprocess (billing/auth). None = agent_env() (unprefixed variables).
-    retries, delay_between_retries, exponential_backoff: agno BaseExternalAgent fields; failures
+    retries (default 0: an agent with side effects must not be re-run silently), delay_between_retries,
+        exponential_backoff: agno BaseExternalAgent fields; failures
         that would fail again (auth, billing, invalid request, max_turns) are not retried.
     max_buffer_size: ClaudeAgentOptions.max_buffer_size (bytes of one SDK message), None = SDK default.
     extra: any other ClaudeAgent field (max_budget_usd, skills, strict_mcp_config, ...).
