@@ -1,7 +1,12 @@
 services:
   agentos:
     build: .
-    env_file: .env
+    # raw: values reach the container literally ($ stays $, quotes stay part of the value),
+    # the same as main.py's load_dotenv except that load_dotenv strips one pair of quotes.
+    # Needs docker compose >= 2.30 (deploy.sh preflight checks it).
+    env_file:
+      - path: .env
+        format: raw
     environment:
       AGENTOS_HOST: 0.0.0.0
       AGENTOS_PORT: "{{ port }}"
@@ -24,12 +29,17 @@ services:
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "5" }
-    mem_limit: 1g
+    mem_limit: 2g
 {%- if needs_postgres %}
 
   postgres:
     image: pgvector/pgvector:pg16
-    env_file: .env
+    # Only what postgres needs, interpolated by compose from .env (not the app's secrets).
+    # Interpolation expands $: a $ in these values must be written $$ in .env.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped

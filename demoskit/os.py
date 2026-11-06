@@ -7,6 +7,9 @@ from agno.db.sqlite import SqliteDb
 from agno.os import AgentOS
 from agno.os.settings import AgnoAPISettings
 
+# AGENTOS_HOST values that keep the API on this machine; "" counts as unset.
+LOOPBACK_HOSTS = ("", "localhost", "127.0.0.1")
+
 
 def make_os(
     id: str,
@@ -22,6 +25,7 @@ def make_os(
     cors_origins: Iterable[str] = (),
     telemetry: bool = False,
     mcp: Any = False,
+    require_key: Optional[bool] = None,
     **extra: Any,
 ) -> AgentOS:
     """An AgentOS with a SQLite db by default and telemetry off.
@@ -31,6 +35,10 @@ def make_os(
         AgentOS(security_key=) parameter; the key lives in AgnoAPISettings.os_security_key
         (which also reads OS_SECURITY_KEY from the env), so it is passed as settings=.
         /health stays open either way.
+    require_key: whether an empty security key is an error. None (default) = required unless
+        $AGENTOS_HOST is unset, "localhost" or "127.0.0.1" (an API on a non-loopback address
+        must not be open); True/False force it either way. Raises RuntimeError when required
+        and missing. Ignored when extra carries its own settings=.
     cors_origins: extra allowed origins (AgentOS cors_allowed_origins; agno adds its own domains).
     on_route_conflict="error": a base_app route that collides with an AgentOS route fails at
         startup instead of being silently shadowed. Override through extra.
@@ -40,7 +48,12 @@ def make_os(
         db_file.parent.mkdir(parents=True, exist_ok=True)
         db = SqliteDb(db_file=str(db_file))
     if "settings" not in extra:
-        extra["settings"] = AgnoAPISettings(os_security_key=security_key or os.getenv("OS_SECURITY_KEY") or None)
+        key = security_key or os.getenv("OS_SECURITY_KEY") or None
+        if require_key is None:
+            require_key = os.getenv("AGENTOS_HOST", "localhost") not in LOOPBACK_HOSTS
+        if require_key and not key:
+            raise RuntimeError("OS_SECURITY_KEY is required when AGENTOS_HOST is not loopback")
+        extra["settings"] = AgnoAPISettings(os_security_key=key)
     extra.setdefault("on_route_conflict", "error")
     return AgentOS(
         id=id,

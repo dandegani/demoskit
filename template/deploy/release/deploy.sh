@@ -6,9 +6,10 @@
 #   bash deploy.sh <config.env> <git sha> --check  # preconditions only, changes nothing
 #
 # Phases (each prints "PHASE <name>: ok|FAIL <why>"; the last line is DEPLOY: OK|ROLLED_BACK|FAILED):
-#   preflight   host reachable, checkout clean, sha exists on origin, disk
+#   preflight   host reachable, DIR and DIR/.env exist, checkout clean, sha exists on origin, disk,
+#               docker compose >= 2.30, DIR/data exists (created) and is uid 1000 (the container's app)
 #   record      current sha, image ids (tagged :rollback), alembic version (only with PG_CONTAINER)
-#   backup      BACKUP_CMD on the host (database dump -> S3), skipped when unset
+#   backup      BACKUP_CMD on the host, which prints "wrote <path>" (e.g. backup-sqlite.sh), skipped when unset
 #   switch      git fetch + checkout <sha> (detached)
 #   build       compose build BUILD_SERVICES
 #   up          compose up -d (migrations, if any, run in the app's entrypoint)
@@ -25,23 +26,56 @@ CONFIG="${1:?config.env}"; SHA="${2:?git sha}"; MODE="${3:-}"
 . "$CONFIG"
 : "${SSH:?}" "${DIR:?}" "${COMPOSE:?}" "${APP_CONTAINER:?}" "${IMAGES:?}" "${HEALTH_URL:?}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-180}"; PG_CONTAINER="${PG_CONTAINER:-}"; APP_SERVICE="${APP_SERVICE:-agentos}"
-remote(){ $SSH "cd $DIR && $*"; }
+# cd failing stops the remote command (so a "set -o pipefail; ..." prefix never runs elsewhere).
+remote(){ $SSH "cd $DIR || exit 1; $*"; }
 say(){ echo "[deploy $(date '+%H:%M:%S')] $*"; }
 phase_ok(){ echo "PHASE $1: ok${2:+ $2}"; }
 phase_fail(){ echo "PHASE $1: FAIL $2"; }
 
+wait_health(){
+  local limit="$1" t0; t0=$(date +%s)
+  while [ $(( $(date +%s) - t0 )) -lt "$limit" ]; do
+    [ "$(curl -s -m 8 -o /dev/null -w '%{http_code}' "$HEALTH_URL")" = "200" ] && return 0
+    sleep 5
+  done
+  return 1
+}
+# docker compose >= this: `!reset` in compose.prod.yaml (2.24) and env_file `format: raw` (2.30).
+COMPOSE_MIN="2.30"
+
 # ---------------------------------------------------------------- preflight
-if ! remote "true" >/dev/null 2>&1; then phase_fail preflight "host unreachable"; echo "DEPLOY: FAILED"; exit 1; fi
+pre_fail(){ phase_fail preflight "$1"; echo "DEPLOY: FAILED"; exit 1; }
+$SSH "true" >/dev/null 2>&1 || pre_fail "host unreachable"
+remote "true" >/dev/null 2>&1 || pre_fail "$DIR missing on the host (git clone the repo there first)"
+remote "test -f .env" || pre_fail "$DIR/.env missing on the host (copy example.env and fill it in)"
 dirty=$(remote "git status --short | wc -l"); cur=$(remote "git rev-parse HEAD"); branch=$(remote "git branch --show-current")
-remote "git fetch -q origin" || { phase_fail preflight "git fetch"; echo "DEPLOY: FAILED"; exit 1; }
-if ! remote "git cat-file -e $SHA^{commit}" 2>/dev/null; then phase_fail preflight "sha $SHA not on origin"; echo "DEPLOY: FAILED"; exit 1; fi
-if [ "$dirty" != "0" ]; then phase_fail preflight "checkout has $dirty uncommitted files (nothing is deployed over local edits)"; echo "DEPLOY: FAILED"; exit 1; fi
+remote "git fetch -q origin" || pre_fail "git fetch"
+remote "git cat-file -e $SHA^{commit}" 2>/dev/null || pre_fail "sha $SHA not on origin"
+[ "$dirty" = "0" ] || pre_fail "checkout has $dirty uncommitted files (nothing is deployed over local edits)"
 free_gb=$(remote "df -BG --output=avail / | tail -1 | tr -dc 0-9")
-[ "${free_gb:-0}" -ge 5 ] || { phase_fail preflight "only ${free_gb}G free"; echo "DEPLOY: FAILED"; exit 1; }
-phase_ok preflight "at ${cur:0:7}${branch:+ ($branch)}, target ${SHA:0:7}, ${free_gb}G free, $(remote "git log --oneline $cur..$SHA | wc -l") commits ahead"
-if [ "$cur" = "$(remote "git rev-parse $SHA")" ]; then echo "DEPLOY: OK (already at $SHA)"; exit 0; fi
+[ "${free_gb:-0}" -ge 5 ] || pre_fail "only ${free_gb}G free"
+compose_v=$($SSH "docker compose version --short" 2>/dev/null | tr -d 'v\r' | head -1)
+[ -n "$compose_v" ] || pre_fail "docker compose not available on the host"
+[ "$(printf '%s\n%s\n' "$COMPOSE_MIN" "$compose_v" | sort -V | head -1)" = "$COMPOSE_MIN" ] \
+  || pre_fail "docker compose $compose_v on the host, need >= $COMPOSE_MIN"
+# data/ is bind-mounted into the container, whose user app is uid 1000 = ubuntu on EC2.
+if [ "$MODE" = "--check" ]; then
+  data_note=$(remote "test -d data && echo 'data/ present' || echo 'data/ would be created'")
+else
+  remote "mkdir -p data" || pre_fail "mkdir $DIR/data"
+  data_note="data/ present"
+fi
+data_uid=$(remote "stat -c %u data 2>/dev/null")
+[ -z "$data_uid" ] || [ "$data_uid" = "1000" ] || pre_fail "$DIR/data owned by uid $data_uid; the container user app is uid 1000"
+phase_ok preflight "at ${cur:0:7}${branch:+ ($branch)}, target ${SHA:0:7}, ${free_gb}G free, compose $compose_v, $data_note, $(remote "git log --oneline $cur..$SHA | wc -l") commits ahead"
+if [ "$cur" = "$(remote "git rev-parse $SHA")" ]; then
+  # Short-circuit only when the app is up; a fresh clone at the target sha still needs build/up.
+  if wait_health 1; then echo "DEPLOY: OK (already at $SHA)"; exit 0; fi
+  say "already at ${SHA:0:7} but $HEALTH_URL is not healthy: not short-circuiting (build + up)"
+fi
 if [ "$MODE" = "--check" ]; then
   echo "would deploy:"; remote "git log --oneline $cur..$SHA" | sed 's/^/  /' | head -20
+  [ "$cur" = "$(remote "git rev-parse $SHA")" ] && echo "  (no new commits; would build and start ${SHA:0:7})"
   echo "DEPLOY: OK (check only)"; exit 0
 fi
 
@@ -57,15 +91,14 @@ for img in $IMAGES; do $SSH "docker tag $img:latest $img:rollback" 2>/dev/null |
 phase_ok record "sha ${cur:0:7}, ${PG_CONTAINER:+alembic $alembic_before, }images tagged :rollback"
 
 # ---------------------------------------------------------------- backup
+# Contract: BACKUP_CMD prints "wrote <path>" (the file it made on the host); that path is
+# taken literally, and with PG_CONTAINER it is the pg_restore dump used on rollback.
 dump=""
 if [ -n "${BACKUP_CMD:-}" ]; then
   out=$($SSH "$BACKUP_CMD" 2>&1); rc=$?
-  dump=$(echo "$out" | grep -oE "wrote [^ ]+\.dump" | head -1 | cut -d' ' -f2)
+  dump=$(echo "$out" | sed -n 's/^.*wrote \([^ ]*\).*$/\1/p' | tail -1)
   if [ $rc -ne 0 ] || [ -z "$dump" ]; then phase_fail backup "$(echo "$out" | tail -2 | tr '\n' ' ')"; echo "DEPLOY: FAILED"; exit 1; fi
-  dump="$(dirname "$(echo "$out" | grep -oE '/[^ ]+\.dump' | head -1 || echo /home/ubuntu/backups/x)")/$dump"
-  [ -f /dev/null ] && dump_path=$($SSH "ls -d /home/ubuntu/backups/*/$(basename "$dump") 2>/dev/null | head -1")
-  dump="${dump_path:-$dump}"
-  phase_ok backup "$(basename "$dump") uploaded to S3"
+  phase_ok backup "wrote $dump"
 else
   phase_ok backup "skipped (no BACKUP_CMD)"
 fi
@@ -84,22 +117,14 @@ rollback(){
   if wait_health 120; then phase_ok rollback "back at ${cur:0:7}, health ok"; echo "DEPLOY: ROLLED_BACK ($why)"; exit 2
   else phase_fail rollback "health still failing after rollback; manual attention needed"; echo "DEPLOY: FAILED ($why; rollback unhealthy)"; exit 3; fi
 }
-wait_health(){
-  local limit="$1" t0; t0=$(date +%s)
-  while [ $(( $(date +%s) - t0 )) -lt "$limit" ]; do
-    [ "$(curl -s -m 8 -o /dev/null -w '%{http_code}' "$HEALTH_URL")" = "200" ] && return 0
-    sleep 5
-  done
-  return 1
-}
-
 # ---------------------------------------------------------------- switch / build / up
 remote "git checkout -q --detach $SHA" || rollback "git checkout failed"
 phase_ok switch "checked out ${SHA:0:7}"
-build_out=$(remote "$COMPOSE build ${BUILD_SERVICES:-} 2>&1 | tail -3"); rc=$?
+# pipefail on the host so rc is compose's, not tail's/grep's (grep finding nothing is fine).
+build_out=$(remote "set -o pipefail; $COMPOSE build ${BUILD_SERVICES:-} 2>&1 | tail -3"); rc=$?
 [ $rc -eq 0 ] || { echo "$build_out"; rollback "build failed"; }
 phase_ok build "$(echo "$build_out" | grep -c Built) images built"
-remote "$COMPOSE up -d 2>&1 | grep -E 'Started|Recreated|Error' | tail -5" || rollback "compose up failed"
+remote "set -o pipefail; $COMPOSE up -d 2>&1 | { grep -E 'Started|Recreated|Error' || true; } | tail -5" || rollback "compose up failed"
 phase_ok up "containers (re)started"
 
 # ---------------------------------------------------------------- health

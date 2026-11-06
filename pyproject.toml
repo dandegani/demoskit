@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "demoskit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Shared building blocks for Demos products on Agno: claude_agent, make_os."
 requires-python = ">=3.11"
 dependencies = ["agno==3.1.6", "claude-agent-sdk"]

@@ -6,24 +6,52 @@
 
 ```bash
 pip install copier
-copier copy ~/demoskit/template ~/my-product   # מ-checkout מקומי של demoskit
+copier copy gh:dandegani/demoskit ~/my-product        # התג האחרון של demoskit (copier.yml בשורש הריפו)
+# או מ-checkout מקומי: copier copy --vcs-ref HEAD ~/demoskit ~/my-product
 cd ~/my-product && git init && cp example.env .env
 pip install -r requirements.txt
 make check    # הבדיקות (test חסר/מדולג = כישלון)
 make run      # http://localhost:{{ port }}/health
 ```
 
+עדכון מהתבנית אחר כך: `copier update` (התשובות ב-`.copier-answers.yml`).
+
 הסוכנים נכתבים ב-`agents.py` עם `claude_agent` ונכנסים ל-`make_os(agents=[...])` ב-`main.py`.
+‏`claude_agent` רץ עם `retries=0` כברירת מחדל: סוכן עם תופעות לוואי לא רץ שוב בשקט.
 
 ## פריסה
 
 רק דרך הכפתור ב-GitHub: ‏Actions → deploy → Run workflow. ‏`check` מראה מה ייפרס ולא משנה
 כלום; `deploy` פורס commit מ-main שה-CI עבר עליו, עם health check ו-rollback אוטומטי
-(`deploy/release/deploy.sh`). לפני הפריסה הראשונה: `deploy/release/production.env.example`
-→ `production.env`, ושורה ב-edge של השרת (`compose.prod.yaml` מסביר).
+(`deploy/release/deploy.sh`).
+
+### פריסה ראשונה, לפי הסדר
+
+1. ריפו ב-GitHub, ו-environment בשם `production` (Settings → Environments) עם שני סודות:
+   `DEPLOY_SSH_KEY` (המפתח הפרטי שנכנס ל-`ubuntu@` בשרת) ו-`DEPLOY_KNOWN_HOSTS`
+   (`ssh-keyscan <host>`).
+2. runner מסוג self-hosted עם התווית `deploy` רשום לריפו (המכונה של DemosOs; ה-security group
+   של השרת מקבל ssh רק ממנה).
+3. בשרת: `git clone` של הריפו ל-`DIR` שב-`deploy/release/production.env` (‏`/home/ubuntu/{{ product_name }}`),
+   ו-`sqlite3` מותקן (‏`apt install sqlite3`; ‏`BACKUP_CMD` משתמש בו).
+4. בשרת: `.env` ב-`DIR` (מ-`example.env`), עם `OS_SECURITY_KEY` (בקונטיינר `AGENTOS_HOST=0.0.0.0`,
+   ובלי מפתח האפליקציה לא עולה) ושיטת החיוב של Claude.
+5. בשרת: deploy key לקריאה בלבד של הריפו (GitHub → Settings → Deploy keys, בלי write) כדי ש-`git fetch` יעבוד.
+6. DNS ל-`{{ domain }}`, תעודה (`issue-cert.sh` ב-edge), ושורת ה-map ב-edge (`compose.prod.yaml` מסביר),
+   ואז `docker exec edge-nginx nginx -s reload`.
+7. `deploy/release/production.env.example` → `production.env` (נכנס ל-git, בלי סודות), עם ה-host.
+8. הכפתור במצב `check`: כל ה-PHASE preflight עוברים (ssh, ‏`.env`, ‏`data/`, ‏docker compose ≥ 2.30, דיסק).
+9. הכפתור במצב `deploy`.
 
 ## איפה הסודות
 
-- בשרת ובפיתוח: `.env` (לא נכנס ל-git; התבנית ב-`example.env`).
+- בשרת ובפיתוח: `.env` (לא נכנס ל-git; התבנית ב-`example.env`). ‏compose קורא אותו ב-`format: raw`:
+  הערכים מילוליים, `$` נשאר `$`, ומרכאות נשארות חלק מהערך, אז לא שמים מרכאות.
 - מפתח ה-ssh לפריסה: סוד `DEPLOY_SSH_KEY` ו-`DEPLOY_KNOWN_HOSTS` ב-environment ‏`production` ב-GitHub.
 - חיוב Claude לסוכנים: `CLAUDE_CODE_OAUTH_TOKEN` (מ-`claude setup-token`) או `ANTHROPIC_API_KEY`, ב-`.env`.
+
+## גיבוי
+
+`deploy/release/backup-sqlite.sh` מגבה את `data/` (כל `*.db` דרך `sqlite3 .backup`, וכל השאר ב-tar)
+ל-`/home/ubuntu/backups/{{ product_name }}/`, ול-S3 כש-`S3_URI` מוגדר. ‏deploy.sh מריץ אותו כ-`BACKUP_CMD`
+לפני כל פריסה (ראו `production.env.example`). את ה-SQLite אין rollback אוטומטי: משחזרים מה-tar ביד.

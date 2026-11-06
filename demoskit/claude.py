@@ -49,7 +49,10 @@ def claude_agent(
         "Read(//<abs dir>/**)" (and the same for Glob/Grep) to allowed_tools, and sets cwd to it.
         "//" is Claude Code's prefix for an absolute filesystem path in a permission rule.
     setting_sources: () means [] = never load the host's user/project/local Claude settings.
-    env: env for the subprocess (billing/auth). None = agent_env() (unprefixed variables).
+    env: billing/auth env for the subprocess. None = agent_env() (unprefixed variables).
+        The SDK merges it OVER the server's full environment, so it can override or blank a
+        key ("" = unset for ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN) but cannot remove one:
+        env={} means "inherit everything", not an empty env. See demoskit.settings.agent_env.
     retries (default 0: an agent with side effects must not be re-run silently), delay_between_retries,
         exponential_backoff: agno BaseExternalAgent fields; failures
         that would fail again (auth, billing, invalid request, max_turns) are not retried.

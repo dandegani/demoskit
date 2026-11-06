@@ -10,6 +10,8 @@ RUN apt-get update \
 
 # Non-root user with a writable home: the Claude CLI keeps its state under $HOME.
 RUN useradd --create-home --home-dir /home/app --shell /bin/bash app
+# The CLI is installed as root and runs as app: it must not try to update itself.
+ENV DISABLE_AUTOUPDATER=1
 ENV HOME=/home/app PYTHONUNBUFFERED=1 AGENTOS_HOST=0.0.0.0 AGENTOS_PORT={{ port }}
 
 WORKDIR /app
