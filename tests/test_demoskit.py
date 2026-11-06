@@ -14,7 +14,7 @@ def test_claude_agent_closed_defaults():
     assert agent.permission_mode == "dontAsk"
     assert agent.model == "sonnet"
     assert agent.name == "Note Taker"
-    assert agent.retries == 2 and agent.delay_between_retries == 30 and agent.exponential_backoff is True
+    assert agent.retries == 0 and agent.delay_between_retries == 30 and agent.exponential_backoff is True
     opts = agent._build_options()
     assert opts.tools == [] and opts.setting_sources == [] and opts.env == {}
 
