@@ -1,4 +1,4 @@
 agno==3.1.6
-demoskit @ git+https://github.com/dandegani/demoskit@v0.1.0
+demoskit @ git+https://github.com/dandegani/demoskit@v0.1.1
 fastapi[standard]
 pytest
