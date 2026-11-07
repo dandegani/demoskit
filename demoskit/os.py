@@ -31,7 +31,7 @@ def make_os(
     """An AgentOS with a SQLite db by default and telemetry off.
 
     db: None = SqliteDb at $AGENTOS_DB (default data/agentos.db); its directory is created.
-    security_key: bearer token for the API. None = $OS_SECURITY_KEY. Agno 3.1.6 has no
+    security_key: bearer token for the API. None = $OS_SECURITY_KEY. Agno 3.1.12 has no
         AgentOS(security_key=) parameter; the key lives in AgnoAPISettings.os_security_key
         (which also reads OS_SECURITY_KEY from the env), so it is passed as settings=.
         /health stays open either way.

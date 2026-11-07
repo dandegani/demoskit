@@ -1,6 +1,9 @@
+import asyncio
 from pathlib import Path
 
 import pytest
+from agno.db.sqlite import SqliteDb
+from claude_agent_sdk import PermissionResultDeny
 from fastapi.testclient import TestClient
 
 from demoskit import agent_env, claude_agent, load_dotenv, make_os
@@ -18,6 +21,27 @@ def test_claude_agent_closed_defaults():
     assert agent.retries == 0 and agent.delay_between_retries == 30 and agent.exponential_backoff is True
     opts = agent._build_options()
     assert opts.tools == [] and opts.setting_sources == [] and opts.env == {}
+
+
+def test_no_approvals_unless_asked_for(tmp_path):
+    # agno 3.1.12 pauses a ClaudeAgent with a db on any tool call its permission mode asks about,
+    # waiting for an AgentOS approval. By default a call nothing allowed is denied instead.
+    db = SqliteDb(db_file=str(tmp_path / "agentos.db"))
+    for mode in ("dontAsk", "bypassPermissions", "acceptEdits", "default"):
+        agent = claude_agent("a", system_prompt="x", permission_mode=mode, db=db, env={})
+        assert agent._uses_native_hitl is False
+        can_use_tool = agent._build_options().can_use_tool
+        if mode in ("dontAsk", "bypassPermissions"):
+            assert can_use_tool is None  # never asks: options unchanged
+        else:
+            denied = asyncio.run(can_use_tool("Bash", {"command": "rm -rf /"}, None))
+            assert isinstance(denied, PermissionResultDeny) and "Bash" in denied.message
+    agent = claude_agent("a", system_prompt="x", permission_mode="acceptEdits", db=db, env={}, approvals=True)
+    assert agent._uses_native_hitl is True
+    with pytest.raises(ValueError, match="approvals=True"):
+        claude_agent("a", system_prompt="x", db=db, env={}, approvals=True)  # dontAsk never asks
+    with pytest.raises(ValueError, match="approvals=True"):
+        claude_agent("a", system_prompt="x", permission_mode="acceptEdits", env={}, approvals=True)  # no db
 
 
 def test_read_only_dir(tmp_path):

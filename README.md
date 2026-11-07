@@ -1,6 +1,6 @@
 # demoskit
 
-ספרייה קטנה של אבני בניין משותפות למוצרי Demos שבנויים על Agno 3.1.6 (AgentOS + ClaudeAgent),
+ספרייה קטנה של אבני בניין משותפות למוצרי Demos שבנויים על Agno 3.1.12 (AgentOS + ClaudeAgent),
 ותבנית copier למוצר חדש. בלי framework ובלי שכבות: שתי פונקציות שמחזירות את אובייקטי Agno עצמם.
 
 ## שתי הפונקציות
@@ -20,7 +20,7 @@
 ו-`agent_env(prefix)` (‏`ANTHROPIC_API_KEY` / `CLAUDE_CONFIG_DIR` / `CLAUDE_CODE_OAUTH_TOKEN`, ראו למטה).
 
 ```bash
-pip install "demoskit @ git+https://github.com/dandegani/demoskit@v0.2.0"          # או [postgres]
+pip install "demoskit @ git+https://github.com/dandegani/demoskit@v0.3.0"          # או [postgres]
 python -m pytest     # הבדיקות, בלי קריאות למודל
 ```
 
@@ -42,8 +42,12 @@ copier copy --vcs-ref HEAD ~/demoskit ~/new-product      # מ-checkout מקומ�
 קוד נכנס ל-demoskit רק כשיש לו משתמש שני. עד אז הוא נשאר במוצר שכתב אותו;
 כשמוצר נוסף צריך אותו, מעבירים אותו לכאן ושני המוצרים עוברים להשתמש בגרסה המשותפת.
 
-## שני דברים לשים לב אליהם ב-`claude_agent`
+## מה לשים לב אליו ב-`claude_agent`
 
+- `approvals=False` כברירת מחדל. ב-`permission_mode` ששואל (למשל `"acceptEdits"`), קריאה לכלי ש-`allowed_tools`
+  לא מכריע נדחית והסוכן ממשיך, כמו ב-Agno 3.1.6. מ-Agno 3.1.12 סוכן עם `db` היה עוצר עליה ומחכה לאישור
+  ב-AgentOS (עד `hitl_timeout`, ‏900 שניות), וריצה בלי אדם הייתה נתקעת. ‏`approvals=True` מפעיל את זה במכוון
+  (צריך `db`). ב-`"dontAsk"` (ברירת המחדל) אין מה לאשר.
 - `retries=0` כברירת מחדל. סוכן שיש לו תופעות לוואי (push, שליחת הודעה) לא רץ שוב בשקט. סוכן קריאה בלבד יכול לקבל `retries=2`.
 - `env=None` פירושו `agent_env()`. ה-SDK **ממזג** את `env` מעל כל הסביבה של תהליך השרת
   (`{**os.environ, **options.env}`), כך שמפתח שלא מופיע ב-`env` עובר בירושה. **`env={}` אינו סביבה ריקה**:

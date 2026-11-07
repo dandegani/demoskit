@@ -7,6 +7,15 @@ from agno.agents.claude import ClaudeAgent
 from demoskit.settings import agent_env
 
 READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
+# Permission modes in which Claude Code never asks: dontAsk denies, bypassPermissions allows.
+NEVER_ASKS = ("dontAsk", "bypassPermissions")
+
+
+async def _deny_unapproved(tool_name: str, tool_input: Dict[str, Any], context: Any) -> Any:
+    """can_use_tool for approvals=False: a call nothing allowed is denied, never put to a person."""
+    from claude_agent_sdk import PermissionResultDeny
+
+    return PermissionResultDeny(message=f"{tool_name} is not allowed for this agent; nobody approves requests at run time.")
 
 
 def _add(items: list, extra: Iterable[str]) -> list:
@@ -36,6 +45,7 @@ def claude_agent(
     delay_between_retries: int = 30,
     exponential_backoff: bool = True,
     max_buffer_size: Optional[int] = None,
+    approvals: bool = False,
     **extra: Any,
 ) -> ClaudeAgent:
     """Build an agno ClaudeAgent (Claude Code as a subprocess) with closed defaults.
@@ -57,6 +67,11 @@ def claude_agent(
         exponential_backoff: agno BaseExternalAgent fields; failures
         that would fail again (auth, billing, invalid request, max_turns) are not retried.
     max_buffer_size: ClaudeAgentOptions.max_buffer_size (bytes of one SDK message), None = SDK default.
+    approvals: what happens to a tool call that permission_mode and allowed_tools leave undecided
+        (only in a mode that asks, e.g. "acceptEdits"; "dontAsk" and "bypassPermissions" never ask).
+        False (default): it is denied and the agent carries on, as on agno 3.1.6; an unattended run
+        never waits on a person. True: agno >= 3.1.12 pauses the run on it as an AgentOS approval
+        (needs db; waits up to the agent's hitl_timeout, default 900 s).
     extra: any other ClaudeAgent field (max_budget_usd, skills, strict_mcp_config, ...).
     """
     from claude_agent_sdk import ClaudeAgentOptions
@@ -71,6 +86,13 @@ def claude_agent(
     options_kwargs: Dict[str, Any] = {"env": dict(agent_env() if env is None else env)}
     if max_buffer_size is not None:
         options_kwargs["max_buffer_size"] = max_buffer_size
+    asks = permission_mode not in NEVER_ASKS
+    if approvals and (db is None or not asks):
+        raise ValueError("approvals=True needs db and a permission_mode that asks (not dontAsk/bypassPermissions)")
+    if asks and not approvals:
+        # agno routes Claude Code's permission prompts into AgentOS approvals unless the
+        # options carry their own can_use_tool (ClaudeAgent._uses_native_hitl).
+        options_kwargs["can_use_tool"] = _deny_unapproved
     return ClaudeAgent(
         id=id,
         name=name or id.replace("-", " ").replace("_", " ").title(),
