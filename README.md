@@ -20,7 +20,7 @@
 ו-`agent_env(prefix)` (‏`ANTHROPIC_API_KEY` / `CLAUDE_CONFIG_DIR` / `CLAUDE_CODE_OAUTH_TOKEN`, ראו למטה).
 
 ```bash
-pip install "demoskit @ git+https://github.com/dandegani/demoskit@v0.3.0"          # או [postgres]
+pip install "demoskit @ git+https://github.com/dandegani/demoskit@v0.3.1"          # או [postgres]
 python -m pytest     # הבדיקות, בלי קריאות למודל
 ```
 

@@ -44,6 +44,24 @@ def test_no_approvals_unless_asked_for(tmp_path):
         claude_agent("a", system_prompt="x", permission_mode="acceptEdits", env={}, approvals=True)  # no db
 
 
+def test_denial_names_the_command_and_what_is_allowed(tmp_path):
+    # The agent must learn which call was refused and that the allowed commands still work.
+    db = SqliteDb(db_file=str(tmp_path / "agentos.db"))
+    agent = claude_agent(
+        "a", system_prompt="x", permission_mode="acceptEdits", db=db, env={},
+        tools=["Bash"], disallowed_tools=(), allowed_tools=["Bash(git commit:*)", "Bash(npm test:*)", "Read"],
+    )
+    deny = agent._build_options().can_use_tool
+    msg = asyncio.run(deny("Bash", {"command": "npx vitest run"}, None)).message
+    assert "npx vitest run" in msg and "git commit:*" in msg and "npm test:*" in msg
+    assert "still works" in msg and "Read" not in msg.split("Allowed rules:")[1]
+    msg = asyncio.run(deny("WebFetch", {"url": "x"}, None)).message
+    assert "WebFetch is not allowed" in msg
+    bare = claude_agent("b", system_prompt="x", permission_mode="acceptEdits", db=db, env={})
+    msg = asyncio.run(bare._build_options().can_use_tool("Bash", {"command": "ls"}, None)).message
+    assert "Bash is not allowed" in msg
+
+
 def test_read_only_dir(tmp_path):
     agent = claude_agent("reader", system_prompt="read", read_only_dir=tmp_path, allowed_tools=["Bash(ls:*)"])
     root = tmp_path.resolve()

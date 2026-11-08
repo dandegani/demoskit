@@ -1,6 +1,6 @@
 """claude_agent: a ClaudeAgent with safe defaults (no host settings, no built-in tools)."""
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional, Union
+from typing import Any, Callable, Dict, Iterable, Optional, Union
 
 from agno.agents.claude import ClaudeAgent
 
@@ -11,11 +11,34 @@ READ_ONLY_TOOLS = ("Read", "Glob", "Grep")
 NEVER_ASKS = ("dontAsk", "bypassPermissions")
 
 
-async def _deny_unapproved(tool_name: str, tool_input: Dict[str, Any], context: Any) -> Any:
-    """can_use_tool for approvals=False: a call nothing allowed is denied, never put to a person."""
-    from claude_agent_sdk import PermissionResultDeny
+def _denier(allowed_tools: Iterable[str]) -> Callable[..., Any]:
+    """can_use_tool for approvals=False: a call nothing allowed is denied, never put to a person.
 
-    return PermissionResultDeny(message=f"{tool_name} is not allowed for this agent; nobody approves requests at run time.")
+    The message names the denied call and what is still allowed, so the agent tries an allowed
+    form instead of concluding that the whole tool is off (2026-11-08: "Bash is not allowed"
+    made SDD agents stop running git commit/push, which were allowed)."""
+    bash_rules = [t[len("Bash(") : -1] for t in allowed_tools if t.startswith("Bash(") and t.endswith(")")]
+
+    async def deny(tool_name: str, tool_input: Dict[str, Any], context: Any) -> Any:
+        from claude_agent_sdk import PermissionResultDeny
+
+        if tool_name == "Bash":
+            command = str((tool_input or {}).get("command", "")).strip()
+            command = command if len(command) <= 200 else command[:200] + "..."
+            if bash_rules:
+                message = (
+                    f"Not run: this Bash command matches none of your allowed rules: {command!r}. "
+                    "Bash itself still works: commands that match a rule run without asking. "
+                    f"Allowed rules: {', '.join(bash_rules)}. In a chain (&&, ;, |) every part must match. "
+                    "Use Edit/Write for file changes, not sed or scripts. Nobody approves other commands at run time."
+                )
+            else:
+                message = f"Not run: Bash is not allowed for this agent ({command!r}). Nobody approves requests at run time."
+        else:
+            message = f"Not run: {tool_name} is not allowed for this agent. Nobody approves requests at run time."
+        return PermissionResultDeny(message=message)
+
+    return deny
 
 
 def _add(items: list, extra: Iterable[str]) -> list:
@@ -92,7 +115,7 @@ def claude_agent(
     if asks and not approvals:
         # agno routes Claude Code's permission prompts into AgentOS approvals unless the
         # options carry their own can_use_tool (ClaudeAgent._uses_native_hitl).
-        options_kwargs["can_use_tool"] = _deny_unapproved
+        options_kwargs["can_use_tool"] = _denier(allowed_tools)
     return ClaudeAgent(
         id=id,
         name=name or id.replace("-", " ").replace("_", " ").title(),
